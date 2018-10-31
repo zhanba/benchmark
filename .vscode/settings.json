@@ -8,5 +8,6 @@
   "tslint.exclude": "**/node_modules/**/*",
   "prettier.singleQuote": false,
   "prettier.semi": false,
-  "typescript.tsdk": "node_modules\\typescript\\lib"
+  "typescript.tsdk": "node_modules\\typescript\\lib",
+  "editor.tabSize": 2
 }
