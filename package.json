@@ -2,9 +2,19 @@
   "name": "modern-benchmark",
   "version": "0.0.1",
   "description": "modern javascript benchmark",
-  "main": "index.js",
+  "main": "dist/modernBenchmark.umd.js",
+  "module": "dist/modernBenchmark.es.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "prebuild": "rimraf dist",
+    "prepare": "npm run build",
+    "build:js": "rollup -c rollup.config.js",
+    "build:dts": "dts-bundle-generator --no-check -o dist/index.d.ts src/index.ts",
+    "build": "npm run build:js && npm run build:dts",
+    "lint": "tslint **/*.ts",
+    "lint:fix": "tslint --project tsconfig.json --fix --format codeFrame",
+    "test": "jest",
+    "ci": "jest && cat ./coverage/lcov.info | coveralls"
   },
   "repository": {
     "type": "git",
@@ -20,12 +30,22 @@
     "url": "https://github.com/zhanba/benchmark/issues"
   },
   "homepage": "https://github.com/zhanba/benchmark#readme",
-  "dependencies": {
-    "typescript": "^3.1.4"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "@types/jest": "^23.3.9",
+    "dts-bundle-generator": "^1.6.1",
+    "jest": "^23.6.0",
+    "lodash.camelcase": "^4.3.0",
     "prettier": "^1.14.3",
+    "rimraf": "^2.6.2",
+    "rollup": "^0.66.6",
+    "rollup-plugin-commonjs": "^9.2.0",
+    "rollup-plugin-node-resolve": "^3.4.0",
+    "rollup-plugin-sourcemaps": "^0.4.2",
+    "rollup-plugin-typescript2": "^0.17.2",
+    "ts-jest": "^23.10.4",
     "tslint": "^5.11.0",
-    "tslint-config-prettier": "^1.15.0"
+    "tslint-config-prettier": "^1.15.0",
+    "typescript": "^3.1.4"
   }
 }

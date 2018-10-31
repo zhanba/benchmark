@@ -9,7 +9,7 @@ export default {
   input: `src/index.ts`,
   output: [
     { file: pkg.main, name: camelCase(pkg.name), format: 'umd' },
-    { file: pkg.module, format: 'es' },
+    { file: pkg.module, name: camelCase(pkg.name), format: 'es' },
   ],
   sourcemap: true,
   // Indicate here external modules you don't wanna include in your bundle (i.e.: 'lodash')
