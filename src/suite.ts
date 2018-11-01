@@ -1,7 +1,10 @@
+import _ from 'lodash'
 import { Benchmark, IBenchmarkOptions } from './benchmark'
+import { EventEmitter } from './eventEmitter'
 import { AnyFunction } from './types'
 
 interface ISuiteOptions {
+  name: string
   onStart: () => void
   onCycle: () => void
   onAbort: () => void
@@ -10,33 +13,44 @@ interface ISuiteOptions {
   onComplete: () => void
 }
 
-export class Suite {
+export class Suite extends EventEmitter {
   /**
    * A flag to indicate if the suite is aborted
    */
-  public aborted: boolean
+  public aborted: boolean = false
 
   /**
    * The number of benchmarks in the suite
    */
-  public length: number
+  public length: number = 0
 
   /**
    * A flag to indicate if the suite is running
    */
-  public running: boolean
+  public running: boolean = false
 
   /**
    * The default options copied by suite instances
    */
-  public options: {
+  public options: ISuiteOptions = {
     /**
      * The name of the suite
      */
-    name: string
+    name: '',
   }
 
-  constructor(name: string, options: ISuiteOptions) {}
+  constructor(name: string, options: ISuiteOptions)
+  constructor(options: ISuiteOptions)
+  constructor(name: any, options?: ISuiteOptions) {
+    super()
+    if (_.isPlainObject(name)) {
+      this.options = name
+    } else {
+      this.options = options!
+      this.name = name
+      // TODO
+    }
+  }
 
   /**
    * Aborts all benchmarks in the suite
@@ -60,41 +74,11 @@ export class Suite {
   public clone(options: ISuiteOptions): Suite
 
   /**
-   * Executes all registered listeners of the specified event type
-   * @param type The event type or object
-   * @param args Arguments to invoke the listener with
-   * @returns Returns the return value of the last listener executed
-   */
-  public emit(type: string | object, ...args: Array<unknown>): unknown
-
-  /**
    * An Array#filter like method
    * @param callback The function/alias called per iteration
    * @returns A new suite of benchmarks that passed callback filter
    */
   public filter(callback: AnyFunction): Suite
-
-  /**
-   * Returns an array of event listeners for a given type that can be manipulated to add or remove listeners
-   * @param type The event type
-   * @returns The listeners array
-   */
-  public listeners(type: string): Array<unknown>
-
-  /**
-   * Unregisters a listener for the specified event type(s), or unregisters all listeners for the specified event type(s), or unregisters all listeners for all event types.
-   * @param type The event type
-   * @param listener The function to unregister
-   * @returns The benchmark instance
-   */
-  public off(type?: string, listener?: () => any): Benchmark
-  /**
-   * Registers a listener for the specified event type(s)
-   * @param type The event type
-   * @param listener The function to unregister
-   * @returns The benchmark instance
-   */
-  public on(type?: string, listener?: () => any): Benchmark
 
   /**
    * Resets all benchmarks in the suite

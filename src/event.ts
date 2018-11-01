@@ -1,16 +1,18 @@
+import _ from 'lodash'
+
 export class Event {
   /**
    * A flag to indicate if the emitters listener iteration is aborted
    */
-  public aborted: boolean
+  public aborted: boolean = false
   /**
    * A flag to indicate if the default action is cancelled
    */
-  public cancelled: boolean
+  public cancelled: boolean = false
   /**
    * The object whose listeners are currently being processed
    */
-  public currentTarget: object
+  public currentTarget?: object
   /**
    * The return value of the last executed listener
    */
@@ -18,7 +20,7 @@ export class Event {
   /**
    * The object to which the event was originally emitted
    */
-  public target: object
+  public target?: object
   /**
    * A timestamp of when the event was created (ms)
    */
@@ -27,5 +29,9 @@ export class Event {
    * The event type
    */
   public type: string
-  constructor(type: string | object) {}
+
+  constructor(type: string) {
+    this.timeStamp = _.now()
+    this.type = type
+  }
 }
