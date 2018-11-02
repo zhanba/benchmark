@@ -1,27 +1,34 @@
 import _ from 'lodash'
 // tslint:disable-next-line:no-submodule-imports
 import uuid from 'uuid/v4'
+import { Deferred } from './deferred'
 import { Event } from './event'
 import { EventEmitter } from './eventEmitter'
-import { AnyFunction, CompareResult, EventName, EventType } from './types'
-import { getU, getZ, uTable } from './util'
+import { AnyFunction, CompareResult, EventType } from './types'
+import { divisors, formatNumber, getU, getZ, uTable } from './util'
 
 export interface IBenchmarkOptions {
   async: boolean
   defer: boolean
-  delay: boolean
+  delay: number
   id: string
   initCount: number
   maxTime: number
   minSamples: number
   minTime: number
   name: string
-  onAbort: AnyFunction
-  onComplete: AnyFunction
-  onCycle: AnyFunction
-  onError: AnyFunction
-  onReset: AnyFunction
-  onStart: AnyFunction
+}
+
+const defaultOptions: IBenchmarkOptions = {
+  async: false,
+  defer: false,
+  delay: 0.005,
+  id: uuid(),
+  initCount: 1,
+  maxTime: 5,
+  minSamples: 5,
+  minTime: 0,
+  name: '',
 }
 
 /**
@@ -105,44 +112,6 @@ export class Benchmark extends EventEmitter {
   public static version: string
 
   /**
-   * A generic Array#filter like method
-   * @param array - The array to iterate over
-   * @param callback - The function/alias called per iteration
-   *
-   * @returns A new array of values that passed callback filter
-   */
-  public static filter: <T>(array: T[], callback: (p: T) => boolean) => T[]
-
-  /**
-   * Converts a number to a more readable comma-separated string representation
-   *
-   * @param n - The number to convert
-   *
-   * @returns The more readable string representation
-   */
-  public static formatNumber: (n: number) => string
-
-  /**
-   * Invokes a method on all items in an array
-   *
-   * @param benchs - Array of benchmarks to iterate over
-   * @param name - The name of the method to invoke OR benchmark options object
-   * @param args - Arguments to invoke the method with
-   * @returns A new array of values returned from each method invoked
-   */
-  public static invoke: (benchs: Benchmark[], name: string | IBenchmarkOptions, ...args: Array<unknown>) => Array<unknown>
-
-  /**
-   * Creates a string of joined array values or object key-value pairs
-   *
-   * @param object - The object to operate on
-   * @param separator1 - The separator used between key-value pairs
-   * @param separator2 - The separator used between keys and values
-   * @returns The joined result
-   */
-  public static join: (object: object | Array<unknown>, separator1?: string, separator2?: string) => string
-
-  /**
    * Create a new Benchmark function using the given context object
    *
    * @param context - The context object
@@ -153,6 +122,66 @@ export class Benchmark extends EventEmitter {
    * Platform object with properties describing things like browser name, version, and operating system. See platform.js.
    */
   public static platform: unknown
+
+  /**
+   * Invokes a method on all items in an array
+   *
+   * @param benchs - Array of benchmarks to iterate over
+   * @param name - The name of the method to invoke OR benchmark options object
+   * @param args - Arguments to invoke the method with
+   * @returns A new array of values returned from each method invoked
+   */
+  public static invoke(benchs: Benchmark[], name: string | IBenchmarkOptions, ...args: Array<unknown>): Array<unknown> {
+    function execute() {}
+  }
+
+  /**
+   * Creates a string of joined array values or object key-value pairs
+   *
+   * @param object - The object to operate on
+   * @param separator1 - The separator used between key-value pairs
+   * @param separator2 - The separator used between keys and values
+   * @returns The joined result
+   */
+  public static join(object: object | Array<unknown>, separator1: string = ',', separator2: string = ': '): string {
+    const result: string[] = []
+
+    if (_.isArray(object)) {
+      object.forEach(val => result.push(String(val)))
+    } else {
+      Object.entries(object).forEach(entry => result.push(entry[0] + separator2 + entry[1]))
+    }
+
+    return result.join(separator1)
+  }
+
+  /**
+   * A generic Array#filter like method
+   * @param array - The array to iterate over
+   * @param callback - The function/alias called per iteration
+   * @returns A new array of values that passed callback filter
+   */
+  public static filter(array: Benchmark[], callback: ((p: Benchmark) => boolean) | 'successful' | 'fastest' | 'slowest'): Benchmark[] {
+    let cb
+    if (callback === 'successful') {
+      // Callback to exclude those that are errored, unrun, or have hz of Infinity.
+      cb = (bench: Benchmark) => {
+        return bench.cycles && _.isFinite(bench.hz) && !bench.error
+      }
+    } else if (callback === 'fastest' || callback === 'slowest') {
+      // Get successful, sort by period + margin of error, and filter fastest/slowest.
+      const result = Benchmark.filter(array, 'successful').sort((a, b) => {
+        const statA = a.stats
+        const statB = b.stats
+        return (statA.mean + statA.moe > statB.mean + statB.moe ? 1 : -1) * (callback === 'fastest' ? 1 : -1)
+      })
+
+      return _.filter(result, bench => {
+        return result[0].compare(bench) === 0
+      })
+    }
+    return _.filter(array, callback)
+  }
 
   /**
    * A flag to indicate if the benchmark is aborted
@@ -168,6 +197,8 @@ export class Benchmark extends EventEmitter {
    * The number of times a test was executed
    */
   public count: number = 0
+
+  public initCount = 0
 
   /**
    * The number of cycles performed while benchmarking
@@ -203,38 +234,23 @@ export class Benchmark extends EventEmitter {
    * Compiled into the test and executed immediately after the test loop
    */
   public teardown: AnyFunction = _.noop
-  public run: unknown
 
   public support: ISupport
-  public stats: IStats = {
-    moe: 0,
-    rme: 0,
-    sem: 0,
-    deviation: 0,
-    mean: 0,
-    sample: [],
-    variance: 0,
-  }
+  public stats: IStats = { moe: 0, rme: 0, sem: 0, deviation: 0, mean: 0, sample: [], variance: 0 }
 
-  public times: ITimes = {
-    cycle: 0,
-    elapsed: 0,
-    period: 0,
-    timeStamp: 0,
-  }
-
-  public options: IBenchmarkOptions
+  public times: ITimes = { cycle: 0, elapsed: 0, period: 0, timeStamp: 0 }
   public id: string
   public delayTime: number = 0
+  public options: IBenchmarkOptions
 
   private name?: string
   private timerId?: ReturnType<typeof setTimeout>
-  // private timerId?: number
+  private original?: Benchmark
 
   /**
    * Used to avoid infinite recursion when methods call each other
    */
-  private calledBy: { [name in EventName]?: boolean } = {}
+  private calledBy: { [name in EventType]?: boolean } = {}
 
   constructor(name: string, fn: AnyFunction, options: IBenchmarkOptions)
   constructor(fn: AnyFunction, options: IBenchmarkOptions)
@@ -262,6 +278,35 @@ export class Benchmark extends EventEmitter {
 
     this.id = uuid()
   }
+
+  public run(): Benchmark {
+    const event = new Event('start')
+    // Set `running` to `false` so `reset()` won't call `abort()`.
+    this.running = false
+    this.reset()
+    this.running = true
+
+    this.count = this.initCount
+    this.times.timeStamp = _.now()
+    this.emit(event)
+
+    if (event.cancelled) {
+      return this
+    }
+
+    // For clones created within `compute()`.
+    if (this.original) {
+      if (this.defer) {
+        new Deferred(this)
+      } else {
+        this.cycles(this, options)
+      }
+    } else {
+      this.compute(this, options)
+    }
+    return this
+  }
+
   public toString(): string {
     const size = this.stats.sample.length
     const pm = '\xb1'
@@ -281,7 +326,7 @@ export class Benchmark extends EventEmitter {
     } else {
       result +=
         ' x ' +
-        Benchmark.formatNumber(this.hz.toFixed(this.hz < 100 ? 2 : 0)) +
+        formatNumber(this.hz.toFixed(this.hz < 100 ? 2 : 0)) +
         ' ops/sec ' +
         pm +
         this.stats.rme.toFixed(2) +
@@ -377,11 +422,101 @@ export class Benchmark extends EventEmitter {
   /**
    * Delay the execution of a function based on the benchmark's `delay` property.
    *
-   * @private
-   * @param {Object} bench The benchmark instance.
-   * @param {Object} fn The function to execute.
+   * @param bench The benchmark instance.
+   * @param fn The function to execute.
    */
   private delay(bench: Benchmark, fn: AnyFunction) {
     bench.timerId = setTimeout(fn, bench.delayTime * 1e3)
   }
+
+  /**
+   * Cycles a benchmark until a run `count` can be established.
+   *
+   * @param clone The cloned benchmark instance.
+   * @param options The options object.
+   */
+  private cycle(clone: Benchmark | Deferred, options: IBenchmarkOptions) {
+    let deferred
+    if (clone instanceof Deferred) {
+      deferred = clone
+      clone = clone.benchmark
+    }
+
+    const bench = clone.original
+
+    let cycles
+    let clocked
+    let minTime
+    if (clone.running) {
+      cycles = ++clone.cycles
+      clocked = deferred ? deferred.elapsed : this.clock(clone)
+      minTime = clone.minTime
+
+      if (bench && cycles > bench.cycles) {
+        bench.cycles = cycles
+      }
+      if (clone.error) {
+        const event = new Event('error')
+        event.message = clone.error
+        clone.emit(event)
+        if (!event.cancelled) {
+          clone.abort()
+        }
+      }
+    }
+
+    if (clone.running) {
+      bench.times.cycle = clone.original.times.cycle = clocked
+      const period = (bench.times.period = clone.original.times.period = clocked / clone.count)
+      bench.hz = clone.hz = 1 / period
+      bench.initCount = clone.initCount = clone.count
+      clone.running = clocked < minTime
+
+      if (clone.running) {
+        const divisor = divisors[clone.cycles]
+        if (!clocked && divisor !== undefined) {
+          clone.count = Math.floor(4e6 / divisor)
+        }
+        if (clone.count <= clone.count) {
+          clone.count += Math.ceil((minTime - clocked) / period)
+        }
+        clone.running = clone.count !== Infinity
+      }
+    }
+
+    // Should we exit early?
+    const cycleEvent = new Event('cycle')
+    clone.emit(cycleEvent)
+    if (cycleEvent.aborted) {
+      clone.abort()
+    }
+
+    if (clone.running) {
+      // TODO
+      clone.count = clone.count // ???
+      if (deferred) {
+        clone.compiled.call(deferred, context, timer)
+      } else if (async) {
+        this.delay(clone, () => this.cycle(clone, options))
+      } else {
+        this.cycle(clone)
+      }
+    } else {
+      // Fix TraceMonkey bug associated with clock fallbacks.
+      // For more information see http://bugzil.la/509069.
+      if (support.browser) {
+        runScript(uid + '=1;delete ' + uid)
+      }
+      // We're done.
+      clone.emit('complete')
+    }
+  }
+
+  /**
+   * Clocks the time taken to execute a test per cycle (secs).
+   *
+   * @param bench The benchmark instance.
+   * @returns {number} The time taken.
+   */
+  private clock() {}
 }

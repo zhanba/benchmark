@@ -1,4 +1,5 @@
 import _ from 'lodash'
+import { EventType } from './types'
 
 export class Event {
   /**
@@ -28,9 +29,9 @@ export class Event {
   /**
    * The event type
    */
-  public type: string
+  public type: EventType
 
-  constructor(type: string) {
+  constructor(type: EventType) {
     this.timeStamp = _.now()
     this.type = type
   }

@@ -3,10 +3,20 @@ import { Benchmark, IBenchmarkOptions } from './benchmark'
 import { Suite } from './suite'
 
 /**
+ * Converts a number to a more readable comma-separated string representation
+ *
+ * @param n - The number to convert
+ * @returns The more readable string representation
+ */
+export const formatNumber = (n: string): string => {
+  const num = n.split('.')
+  return num[0].replace(/(?=(?:\d{3})+$)(?!\b)/g, ',') + (num[1] ? '.' + num[1] : '')
+}
+
+/**
  * A specialized version of `_.cloneDeep` which only clones arrays and plain
  * objects assigning all other values by reference.
  *
- * @private
  * @param value The value to clone.
  * @returns The cloned value.
  */
@@ -16,30 +26,6 @@ export let cloneDeep = _.partial(_.cloneDeepWith, _, (value: unknown) => {
     return value
   }
 })
-
-/**
- * A helper function for setting options/event handlers.
- *
- * @private
- * @param {Object} object The benchmark or suite instance.
- * @param {Object} [options={}] Options object.
- */
-export function setOptions(object: Benchmark | Suite, options: IBenchmarkOptions) {
-  options = object.options = _.assign({}, cloneDeep(object.constructor.options), cloneDeep(options))
-
-  _.forOwn(options, (value, key) => {
-    if (value != null) {
-      // Add event listeners.
-      if (/^on[A-Z]/.test(key)) {
-        _.each(key.split(' '), keyName => {
-          object.on(keyName.slice(2).toLowerCase(), value)
-        })
-      } else if (!_.has(object, key)) {
-        object[key] = cloneDeep(value)
-      }
-    }
-  })
-}
 
 const getScore = (xA: number, sampleB: number[]) => {
   return _.reduce(
@@ -97,4 +83,13 @@ export let uTable: any[][any[][number]] = {
   '28': [12, 21, 30, 40, 50, 60, 70, 80, 90, 101, 111, 122, 132, 143, 154, 164, 175, 186, 196, 207, 218, 228, 239, 250, 261, 272],
   '29': [13, 22, 32, 42, 52, 62, 73, 83, 94, 105, 116, 127, 138, 149, 160, 171, 182, 193, 204, 215, 226, 238, 249, 260, 271, 282, 294],
   '30': [13, 23, 33, 43, 54, 65, 76, 87, 98, 109, 120, 131, 143, 154, 166, 177, 189, 200, 212, 223, 235, 247, 258, 270, 282, 293, 305, 317],
+}
+
+/** Used to avoid hz of Infinity. */
+export let divisors: { [key: number]: number } = {
+  '1': 4096,
+  '2': 512,
+  '3': 64,
+  '4': 8,
+  '5': 0,
 }
