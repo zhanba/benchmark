@@ -5,7 +5,7 @@ import { Deferred } from './deferred'
 import { Event } from './event'
 import { EventEmitter } from './eventEmitter'
 import { AnyFunction, CompareResult, EventType } from './types'
-import { divisors, formatNumber, getU, getZ, uTable } from './util'
+import { divisors, formatNumber, getMean, getU, getZ, isStringable, uTable } from './util'
 
 export interface IBenchmarkOptions {
   async: boolean
@@ -183,6 +183,8 @@ export class Benchmark extends EventEmitter {
     return _.filter(array, callback)
   }
 
+  private static defaultOptions: IBenchmarkOptions = defaultOptions
+
   /**
    * A flag to indicate if the benchmark is aborted
    */
@@ -235,6 +237,8 @@ export class Benchmark extends EventEmitter {
    */
   public teardown: AnyFunction = _.noop
 
+  public minTime: number
+
   public support: ISupport
   public stats: IStats = { moe: 0, rme: 0, sem: 0, deviation: 0, mean: 0, sample: [], variance: 0 }
 
@@ -243,14 +247,16 @@ export class Benchmark extends EventEmitter {
   public delayTime: number = 0
   public options: IBenchmarkOptions
 
-  private name?: string
-  private timerId?: ReturnType<typeof setTimeout>
-  private original?: Benchmark
+  protected timer = { ns: Date, start: null, stop: null }
 
   /**
    * Used to avoid infinite recursion when methods call each other
    */
-  private calledBy: { [name in EventType]?: boolean } = {}
+  protected calledBy: { [name in EventType]?: boolean } = {}
+
+  private name?: string
+  private timerId?: ReturnType<typeof setTimeout>
+  private original: Benchmark
 
   constructor(name: string, fn: AnyFunction, options: IBenchmarkOptions)
   constructor(fn: AnyFunction, options: IBenchmarkOptions)
@@ -279,8 +285,12 @@ export class Benchmark extends EventEmitter {
     this.id = uuid()
   }
 
-  public run(): Benchmark {
+  public run(options?: IBenchmarkOptions): Benchmark {
+    // 新选项覆盖
+    this.options = { ...this.options, ...options }
+
     const event = new Event('start')
+
     // Set `running` to `false` so `reset()` won't call `abort()`.
     this.running = false
     this.reset()
@@ -299,7 +309,7 @@ export class Benchmark extends EventEmitter {
       if (this.defer) {
         new Deferred(this)
       } else {
-        this.cycles(this, options)
+        this.cycle(this, options)
       }
     } else {
       this.compute(this, options)
@@ -387,9 +397,8 @@ export class Benchmark extends EventEmitter {
    * @param options - Options object to overwrite cloned options
    * @returns  The new benchmark instance
    */
-  public clone(options: IBenchmarkOptions): Benchmark {
-    // TODO
-    return this
+  public clone(options?: IBenchmarkOptions): Benchmark {
+    return new Benchmark({ ...this.options, ...options })
   }
 
   /**
@@ -417,6 +426,54 @@ export class Benchmark extends EventEmitter {
       }
     }
     return this
+  }
+
+  private enqueue(queue: Benchmark[]) {
+    queue.push(
+      Object.assign(this.clone(), {
+        events: {
+          abort: [this.update],
+          cycle: [this.update],
+          error: [this.update],
+          start: [this.update],
+        },
+        original: this,
+      })
+    )
+  }
+
+  private evalute(event: Event) {
+    const clone = event.target
+    const done = bench.aborted
+  }
+
+  /**
+   * Updates the clone/original benchmarks to keep their data in sync.
+   */
+  private update(event: Event) {
+    const { type } = event
+    if (this.running) {
+      if (type === 'start') {
+        this.count = this.initCount
+      } else {
+        if (type === 'error') {
+          this.original.error = this.error
+        }
+        if (type === 'abort') {
+          this.original.abort()
+          this.original.emit('cycle')
+        }
+      }
+    } else if (this.aborted) {
+      this.events.abort.length = 0
+      this.abort()
+    }
+  }
+
+  private compute() {
+    const queue: Benchmark[] = []
+    this.enqueue(queue)
+    Benchmark.invoke()
   }
 
   /**
@@ -518,5 +575,244 @@ export class Benchmark extends EventEmitter {
    * @param bench The benchmark instance.
    * @returns {number} The time taken.
    */
-  private clock() {}
+  private clock() {
+    const options = Benchmark.defaultOptions
+    const templateData = {}
+    const timers = { ns: this.timer.ns, res: Math.max(0.0015, this.getRes('ms')) }
+  }
+
+  private _clock(clone: Benchmark | Deferred) {
+    let deferred: Deferred | undefined
+    if (clone instanceof Deferred) {
+      deferred = clone
+      clone = deferred.benchmark
+    }
+
+    const bench = clone.original
+    const stringable = isStringable(bench.fn)
+    bench.count = clone.count
+    const count = bench.count
+    const decompilable = stringable || ((this.support.decompilation && clone.setup !== _.noop) || clone.teardown !== _.noop)
+    const id = bench.id
+    const name = bench.name || (typeof id === 'number' ? '<Test #' + id + '>' : id)
+    const result = 0
+
+    // TODO
+    clone.minTime = bench.minTime || (bench.minTime = bench.options.minTime = Benchmark.defaultOptions.minTime)
+
+    let funcBody =
+      deferred === undefined
+        ? 'var d#=this,${fnArg}=d#,m#=d#.benchmark.original,f#=m#.fn,su#=m#.setup,td#=m#.teardown;' +
+          'if(!d#.cycles){' +
+          'd#.fn=function(){var ${fnArg}=d#;if(typeof f#=="function"){try{${fn}\n}catch(e#){f#(d#)}}else{${fn}\n}};' +
+          'd#.teardown=function(){d#.cycles=0;if(typeof td#=="function"){try{${teardown}\n}catch(e#){td#()}}else{${teardown}\n}};' +
+          'if(typeof su#=="function"){try{${setup}\n}catch(e#){su#()}}else{${setup}\n};' +
+          't#.start(d#);' +
+          '}d#.fn();return{uid:"${uid}"}'
+        : 'var r#,s#,m#=this,f#=m#.fn,i#=m#.count,n#=t#.ns;${setup}\n${begin};' +
+          'while(i#--){${fn}\n}${end};${teardown}\nreturn{elapsed:r#,uid:"${uid}"}' // When `deferred.cycles` is `0` then... // set `deferred.fn`, // set `deferred.teardown`, // execute the benchmark's `setup`, // start timer, // and then execute `deferred.fn` and return a dummy object.
+
+    // TODO
+    let compiled = createCompiled(bench, decompilable, deferred, funcBody)
+    const isEmpty = !(templateData.fn || stringable)
+
+    try {
+      if (isEmpty) {
+        // Firefox may remove dead code from `Function#toString` results.
+        // For more information see http://bugzil.la/536085.
+        throw new Error('The test "' + name + '" is empty. This may be the result of dead code removal.')
+      } else if (!deferred) {
+        // Pretest to determine if compiled code exits early, usually by a
+        // rogue `return` statement, by checking for a return object with the uid.
+        bench.count = 1
+        compiled = decompilable && (compiled.call(bench, context, timer) || {}).uid === templateData.uid && compiled
+        bench.count = count
+      }
+    } catch (e) {
+      compiled = null
+      clone.error = e || new Error(String(e))
+      bench.count = count
+    }
+
+    // Fallback when a test exits early or errors during pretest.
+    if (!compiled && !deferred && !isEmpty) {
+      funcBody =
+        (stringable || (decompilable && !clone.error)
+          ? 'function f#(){${fn}\n}var r#,s#,m#=this,i#=m#.count'
+          : 'var r#,s#,m#=this,f#=m#.fn,i#=m#.count') +
+        ',n#=t#.ns;${setup}\n${begin};m#.f#=f#;while(i#--){m#.f#()}${end};' +
+        'delete m#.f#;${teardown}\nreturn{elapsed:r#}'
+
+      compiled = this.createCompiled(bench, decompilable, deferred, funcBody)
+
+      try {
+        // Pretest one more time to check for errors.
+        bench.count = 1
+        compiled.call(bench, context, timer)
+        bench.count = count
+        delete clone.error
+      } catch (e) {
+        bench.count = count
+        if (!clone.error) {
+          clone.error = e || new Error(String(e))
+        }
+      }
+    }
+    // If no errors run the full test loop.
+    if (!clone.error) {
+      compiled = bench.compiled = clone.compiled = this.createCompiled(bench, decompilable, deferred, funcBody)
+      result = compiled.call(deferred || bench, context, timer).elapsed
+    }
+    return result
+  }
+
+  private getRes(unit: 'us' | 'ns' | 'ms') {
+    let measured
+    let begin
+    let count = 30
+    let divisor = 1e3
+    const ns = this.timer.ns
+    const sample = []
+
+    // Get average smallest measurable time.
+    while (count--) {
+      if (unit === 'us') {
+        divisor = 1e6
+        if (ns.stop) {
+          ns.start()
+          while (!(measured = ns.microseconds())) {}
+        } else {
+          begin = ns()
+          while (!(measured = ns() - begin)) {}
+        }
+      } else if (unit === 'ns') {
+        divisor = 1e9
+        begin = (begin = ns())[0] + begin[1] / divisor
+        while (!(measured = (measured = ns())[0] + measured[1] / divisor - begin)) {}
+        divisor = 1
+      } else if (ns.now) {
+        begin = +ns.now()
+        while (!(measured = +ns.now() - begin)) {}
+      } else {
+        begin = new ns().getTime()
+        while (!(measured = new ns().getTime() - begin)) {}
+      }
+      // Check for broken timers.
+      if (measured > 0) {
+        sample.push(measured)
+      } else {
+        sample.push(Infinity)
+        break
+      }
+    }
+    // Convert to seconds.
+    return getMean(sample) / divisor
+  }
+
+  /**
+   * Interpolates a given template string.
+   */
+  private interpolate(string) {
+    // Replaces all occurrences of `#` with a unique number and template tokens with content.
+    return _.template(string.replace(/\#/g, /\d+/.exec(templateData.uid)))(templateData)
+  }
+
+  /**
+   * Runs a snippet of JavaScript via script injection.
+   *
+   * @param {string} code The code to run.
+   */
+  private runScript(code) {
+    const anchor = freeDefine ? define.amd : Benchmark
+    const script = document.createElement('script')
+    const sibling = document.getElementsByTagName('script')[0]
+    const parent = sibling.parentNode
+    const prop = uid + 'runScript'
+    const prefix = '(' + (freeDefine ? 'define.amd.' : 'Benchmark.') + prop + '||function(){})();'
+
+    // Firefox 2.0.0.2 cannot use script injection as intended because it executes
+    // asynchronously, but that's OK because script injection is only used to avoid
+    // the previously commented JaegerMonkey bug.
+    try {
+      // Remove the inserted script *before* running the code to avoid differences
+      // in the expected script element count/order of the document.
+      script.appendChild(document.createTextNode(prefix + code))
+      anchor[prop] = function() {
+        destroyElement(script)
+      }
+    } catch (e) {
+      parent = parent.cloneNode(false)
+      sibling = null
+      script.text = code
+    }
+    parent.insertBefore(script, sibling)
+    delete anchor[prop]
+  }
+
+  /**
+   * Creates a function from the given arguments string and body.
+   *
+   * @param {string} args The comma separated function arguments.
+   * @param {string} body The function body.
+   * @returns {Function} The new function.
+   */
+  private createFunction() {
+    // Lazy define.
+    let createFunction = (args, body) => {
+      let result
+      const anchor = freeDefine ? freeDefine.amd : Benchmark
+      const prop = uid + 'createFunction'
+
+      this.runScript((freeDefine ? 'define.amd.' : 'Benchmark.') + prop + '=function(' + args + '){' + body + '}')
+      result = anchor[prop]
+      delete anchor[prop]
+      return result
+    }
+    // Fix JaegerMonkey bug.
+    // For more information see http://bugzil.la/639720.
+    createFunction = support.browser && (this.createFunction('', 'return"' + uid + '"') || _.noop)() === uid ? createFunction : Function
+    return this.createFunction.apply(null, arguments)
+  }
+
+  /**
+   * Creates a compiled function from the given function `body`.
+   */
+  private createCompiled(bench, decompilable, deferred, body) {
+    const fn = bench.fn
+    const fnArg = deferred ? getFirstArgument(fn) || 'deferred' : ''
+
+    templateData.uid = uid + uidCounter++
+
+    _.assign(templateData, {
+      setup: decompilable ? getSource(bench.setup) : interpolate('m#.setup()'),
+      fn: decompilable ? getSource(fn) : interpolate('m#.fn(' + fnArg + ')'),
+      fnArg,
+      teardown: decompilable ? getSource(bench.teardown) : interpolate('m#.teardown()'),
+    })
+
+    // Use API of chosen timer.
+    if (timer.unit === 'ns') {
+      _.assign(templateData, { begin: interpolate('s#=n#()'), end: interpolate('r#=n#(s#);r#=r#[0]+(r#[1]/1e9)') })
+    } else if (timer.unit === 'us') {
+      if (timer.ns.stop) {
+        _.assign(templateData, { begin: interpolate('s#=n#.start()'), end: interpolate('r#=n#.microseconds()/1e6') })
+      } else {
+        _.assign(templateData, { begin: interpolate('s#=n#()'), end: interpolate('r#=(n#()-s#)/1e6') })
+      }
+    } else if (timer.ns.now) {
+      _.assign(templateData, { begin: interpolate('s#=(+n#.now())'), end: interpolate('r#=((+n#.now())-s#)/1e3') })
+    } else {
+      _.assign(templateData, { begin: interpolate('s#=new n#().getTime()'), end: interpolate('r#=(new n#().getTime()-s#)/1e3') })
+    }
+    // Define `timer` methods.
+    timer.start = createFunction(interpolate('o#'), interpolate('var n#=this.ns,${begin};o#.elapsed=0;o#.timeStamp=s#'))
+
+    timer.stop = createFunction(interpolate('o#'), interpolate('var n#=this.ns,s#=o#.timeStamp,${end};o#.elapsed=r#'))
+
+    // Create compiled test.
+    return createFunction(
+      interpolate('window,t#'),
+      'var global = window, clearTimeout = global.clearTimeout, setTimeout = global.setTimeout;\n' + interpolate(body)
+    )
+  }
 }

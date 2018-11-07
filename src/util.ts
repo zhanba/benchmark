@@ -1,6 +1,22 @@
 import _ from 'lodash'
-import { Benchmark, IBenchmarkOptions } from './benchmark'
-import { Suite } from './suite'
+
+export const getMean = (sample: number[]) => {
+  return (
+    sample.reduce((sum, x) => {
+      return sum + x
+    }) / sample.length || 0
+  )
+}
+
+/**
+ * Checks if a value can be safely coerced to a string.
+ *
+ * @param value The value to check.
+ * @returns {boolean} Returns `true` if the value can be coerced, else `false`.
+ */
+export const isStringable = (value: any) => {
+  return _.isString(value) || (_.has(value, 'toString') && _.isFunction(value.toString))
+}
 
 /**
  * Converts a number to a more readable comma-separated string representation

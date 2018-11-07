@@ -3,7 +3,7 @@ import { Event } from './event'
 import { AnyFunction, EventType } from './types'
 
 export class EventEmitter {
-  private events: { [type: string]: AnyFunction[] } = {}
+  protected events: { [type: string]: AnyFunction[] } = {}
 
   public on(type: EventType | EventType[], listener: AnyFunction) {
     const types = _.isArray(type) ? type : [type]
