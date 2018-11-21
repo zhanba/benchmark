@@ -254,6 +254,9 @@ export class Benchmark extends EventEmitter {
    */
   protected calledBy: { [name in EventType]?: boolean } = {}
 
+  /** Used to integrity check compiled tests. */
+  private uid = 'uid' + +_.now()
+
   private name?: string
   private timerId?: ReturnType<typeof setTimeout>
   private original: Benchmark
@@ -722,13 +725,13 @@ export class Benchmark extends EventEmitter {
    *
    * @param {string} code The code to run.
    */
-  private runScript(code) {
-    const anchor = freeDefine ? define.amd : Benchmark
+  private runScript(code: string) {
+    const anchor = Benchmark
     const script = document.createElement('script')
     const sibling = document.getElementsByTagName('script')[0]
     const parent = sibling.parentNode
-    const prop = uid + 'runScript'
-    const prefix = '(' + (freeDefine ? 'define.amd.' : 'Benchmark.') + prop + '||function(){})();'
+    const prop = this.uid + 'runScript'
+    const prefix = '(' + 'Benchmark.' + prop + '||function(){})();'
 
     // Firefox 2.0.0.2 cannot use script injection as intended because it executes
     // asynchronously, but that's OK because script injection is only used to avoid
